@@ -1,0 +1,24 @@
+name: Deploy to Modal
+
+on:
+  push:
+    branches: [main]
+    paths: ["voice_api.py", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install modal
+      - run: modal deploy voice_api.py
+      - name: Print endpoint URL
+        run: |
+          echo "Deployed. Your API URL is printed above as https://<workspace>--canwe-voice-web.modal.run"
