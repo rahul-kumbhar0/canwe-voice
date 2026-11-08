@@ -18,7 +18,17 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install modal
-      - run: modal deploy voice_api.py
-      - name: Print endpoint URL
+      - name: Deploy
+        run: modal deploy voice_api.py
+      - name: Health check
         run: |
-          echo "Deployed. Your API URL is printed above as https://<workspace>--canwe-voice-web.modal.run"
+          URL=$(python -c "import modal;print(modal.Function.from_name('canwe-voice','web').get_web_url())")
+          echo "API URL: $URL"
+          echo "### API URL: $URL" >> "$GITHUB_STEP_SUMMARY"
+          for i in 1 2 3 4 5 6; do
+            curl -fsS --max-time 120 "$URL/health" && exit 0
+            sleep 20
+          done
+          exit 1
+      - name: Register Telegram webhook (token stays inside Modal)
+        run: modal run voice_api.py::setup_webhook

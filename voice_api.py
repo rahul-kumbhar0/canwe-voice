@@ -480,6 +480,27 @@ def _store_voice(name: str, data: bytes, ext: str) -> list[str]:
     return list_voices()
 
 
+
+@app.function(image=image, secrets=secrets)
+def setup_webhook() -> dict:
+    """Point @canweaibot at the deployed web endpoint. Runs inside Modal so the bot token
+    and API key never leave the Modal secret.  modal run voice_api.py::setup_webhook"""
+    import httpx
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    key = os.environ.get("API_KEY", "").strip()
+    if not token or not key:
+        return {"ok": False, "skipped": "TELEGRAM_BOT_TOKEN or API_KEY missing in canwe-voice-secrets"}
+    base = modal.Function.from_name(APP_NAME, "web").get_web_url().rstrip("/")
+    r = httpx.post(
+        f"https://api.telegram.org/bot{token}/setWebhook",
+        data={"url": f"{base}/telegram/{key}", "drop_pending_updates": "true"},
+        timeout=30,
+    ).json()
+    info = httpx.get(f"https://api.telegram.org/bot{token}/getWebhookInfo", timeout=30).json().get("result", {})
+    return {"ok": r.get("ok"), "description": r.get("description"), "endpoint": base,
+            "pending_updates": info.get("pending_update_count"), "last_error": info.get("last_error_message")}
+
 @app.local_entrypoint()
 def add_voice(name: str = DEFAULT_VOICE, path: str = "rahul.wav"):
     p = Path(path)
