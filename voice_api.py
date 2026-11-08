@@ -498,8 +498,12 @@ def setup_webhook() -> dict:
         timeout=30,
     ).json()
     info = httpx.get(f"https://api.telegram.org/bot{token}/getWebhookInfo", timeout=30).json().get("result", {})
-    return {"ok": r.get("ok"), "description": r.get("description"), "endpoint": base,
-            "pending_updates": info.get("pending_update_count"), "last_error": info.get("last_error_message")}
+    out = {"ok": r.get("ok"), "description": r.get("description"), "endpoint": base,
+           "pending_updates": info.get("pending_update_count"), "last_error": info.get("last_error_message")}
+    print("webhook:", out)
+    if not r.get("ok"):
+        raise RuntimeError(f"setWebhook failed: {r.get('description')}")
+    return out
 
 @app.local_entrypoint()
 def add_voice(name: str = DEFAULT_VOICE, path: str = "rahul.wav"):
