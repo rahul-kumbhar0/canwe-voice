@@ -31,7 +31,7 @@ SETTINGS_FILE = DATA / "settings.json"
 HF_CACHE = DATA / "hf"                # model weights cached here (downloaded once)
 
 DEFAULT_VOICE = "rahul"
-DEFAULT_LANG = "hi"                   # hi | en | ... (23 langs)
+DEFAULT_LANG = "en"                   # en | hi | ... (23 langs)
 DEFAULT_MODEL = "multi"               # multi (V3, any language) | turbo (English + [laugh] tags)
 
 # GPU is chosen at deploy time. Empty = CPU-only (works on Modal's free tier without a card,
@@ -92,6 +92,12 @@ def _save_settings(s: dict):
 
 def _chat_cfg(chat_id) -> dict:
     s = _load_settings()
+    if s.get("_defaults_v") != 2:          # v2: default language switched hi -> en
+        for k, v in s.items():
+            if isinstance(v, dict) and v.get("lang") == "hi":
+                v["lang"] = DEFAULT_LANG
+        s["_defaults_v"] = 2
+        _save_settings(s)
     return s.get(str(chat_id), {"voice": DEFAULT_VOICE, "lang": DEFAULT_LANG, "model": DEFAULT_MODEL})
 
 
@@ -139,7 +145,12 @@ def save_voice(name: str, wav_bytes: bytes) -> str:
     """Store a reference clip as 24 kHz mono wav (what Chatterbox likes)."""
     name = re.sub(r"[^a-z0-9_-]", "", name.lower()) or DEFAULT_VOICE
     VOICES_DIR.mkdir(parents=True, exist_ok=True)
-    clean = ffmpeg_convert(wav_bytes, "wav", "wav", ["-ac", "1", "-ar", "24000"])
+    # Chatterbox conditions on roughly the first 10 s, so drop leading/trailing silence and
+    # normalise loudness: those seconds should be pure, even speech.
+    trim = ("silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.1,"
+            "areverse,silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.2,areverse,"
+            "loudnorm=I=-20:TP=-2")
+    clean = ffmpeg_convert(wav_bytes, "wav", "wav", ["-ac", "1", "-af", trim, "-ar", "24000"])
     (VOICES_DIR / f"{name}.wav").write_bytes(clean)
     volume.commit()
     return name
@@ -387,8 +398,8 @@ def web():
             "description": (
                 "Generate a voice-over in Rahul's own cloned voice (canwe.ai) and return a download URL "
                 "for the mp3. Use this for every reel voice-over instead of ElevenLabs. Default language is "
-                "Hinglish/Hindi ('hi'); write Hinglish in Roman or Devanagari script. Use model 'turbo' only "
-                "for English lines that need [laugh]/[chuckle]/[sigh] tags. Download the URL (e.g. curl -L -o "
+                "English ('en'); pass language 'hi' only for Hindi/Hinglish scripts. Model 'turbo' is "
+                "English-only and supports [laugh]/[chuckle]/[sigh] tags. Download the URL (e.g. curl -L -o "
                 "vo.mp3 '<url>') and use the file as the reel's audio track. First call after idle can take "
                 "1-2 minutes while the GPU wakes up."
             ),
@@ -397,7 +408,7 @@ def web():
                 "properties": {
                     "text": {"type": "string", "description": "The full script to speak."},
                     "language": {"type": "string", "default": DEFAULT_LANG,
-                                 "description": "hi (Hindi/Hinglish, default), en, or another Chatterbox language code."},
+                                 "description": "en (English, default), hi (Hindi/Hinglish), or another Chatterbox language code."},
                     "model": {"type": "string", "enum": ["multi", "turbo"], "default": DEFAULT_MODEL},
                     "voice": {"type": "string", "default": DEFAULT_VOICE},
                     "exaggeration": {"type": "number", "default": 0.5,
