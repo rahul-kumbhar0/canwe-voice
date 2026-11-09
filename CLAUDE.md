@@ -213,10 +213,11 @@ or `"upload_to_drive": true` in API calls.
 ## 8. Fill in as you go
 
 ```
-MODAL_URL      = https://________--canwe-voice-web.modal.run
-API_KEY        = (in Modal secret canwe-voice-secrets; never write it here)
+MODAL_URL      = https://rahul-kumbhar0--canwe-voice-web.us-east.modal.run   (deployed 2026-11-09, CPU mode)
+API_KEY        = GitHub secret VOICE_API_KEY → synced into Modal secret canwe-voice-secrets; never write it here
+GPU            = none (no card on Modal yet). Add card → repo variable CANWE_GPU=T4 → redeploy
 Voices on file = rahul, rahul_en (?)
-Webhook set    = yes / no
+Webhook set    = yes (auto, by deploy workflow)
 Test mp3 OK    = yes / no  (Rahul's feedback: ...)
 tech-reel-studio switched = yes / no
 ```
