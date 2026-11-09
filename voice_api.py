@@ -34,6 +34,11 @@ DEFAULT_VOICE = "rahul"
 DEFAULT_LANG = "hi"                   # hi | en | ... (23 langs)
 DEFAULT_MODEL = "multi"               # multi (V3, any language) | turbo (English + [laugh] tags)
 
+# GPU is chosen at deploy time. Empty = CPU-only (works on Modal's free tier without a card,
+# but each voice-over takes minutes). Set the GitHub repo variable CANWE_GPU=T4 once a payment
+# method is on the Modal account (that also unlocks the full $30/mo free credit).
+GPU = os.environ.get("CANWE_GPU", "").strip() or None
+
 app = modal.App(APP_NAME)
 volume = modal.Volume.from_name(f"{APP_NAME}-data", create_if_missing=True)
 
@@ -135,25 +140,36 @@ def save_voice(name: str, wav_bytes: bytes) -> str:
 # =============================================================================
 @app.cls(
     image=image,
-    gpu="T4",                      # cheapest GPU on Modal; both models fit easily
+    gpu=GPU,                       # "T4" when CANWE_GPU is set, else CPU
+    cpu=None if GPU else 4.0,
+    memory=None if GPU else 8192,
     volumes={str(DATA): volume},
     secrets=secrets,
     scaledown_window=120,          # keep warm 2 min after last call, then $0
-    timeout=600,
+    timeout=600 if GPU else 1800,
 )
 class Voice:
     @modal.enter()
     def load(self):
         import torch
         from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-        from chatterbox.tts_turbo import ChatterboxTurboTTS
 
         t0 = time.time()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        if self.device == "cpu":
+            torch.set_num_threads(4)
         self.multi = ChatterboxMultilingualTTS.from_pretrained(device=self.device)
-        self.turbo = ChatterboxTurboTTS.from_pretrained(device=self.device)
+        self._turbo = None         # loaded on first use (saves RAM/time when only Hindi is used)
         volume.commit()            # persist freshly downloaded weights
-        print(f"models loaded in {time.time()-t0:.1f}s on {self.device}")
+        print(f"multi model loaded in {time.time()-t0:.1f}s on {self.device}")
+
+    @property
+    def turbo(self):
+        if self._turbo is None:
+            from chatterbox.tts_turbo import ChatterboxTurboTTS
+            self._turbo = ChatterboxTurboTTS.from_pretrained(device=self.device)
+            volume.commit()
+        return self._turbo
 
     @modal.method()
     def synth(
@@ -254,7 +270,7 @@ def drive_upload(filename: str, data: bytes, mime: str = "audio/mpeg") -> str | 
 # =============================================================================
 # Web app: OpenAI-compatible API + Telegram webhook  (runs on cheap CPU)
 # =============================================================================
-@app.function(image=image, volumes={str(DATA): volume}, secrets=secrets, timeout=600)
+@app.function(image=image, volumes={str(DATA): volume}, secrets=secrets, timeout=1800)
 @modal.asgi_app()
 def web():
     from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
@@ -470,7 +486,7 @@ def web():
 # =============================================================================
 # Telegram update processing (spawned by the webhook so it can ack instantly)
 # =============================================================================
-@app.function(image=image, volumes={str(DATA): volume}, secrets=secrets, timeout=600)
+@app.function(image=image, volumes={str(DATA): volume}, secrets=secrets, timeout=1800)
 async def tg_worker(upd: dict):
     import httpx
 

@@ -12,6 +12,7 @@ jobs:
     env:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      CANWE_GPU: ${{ vars.CANWE_GPU }}   # repo variable; set to T4 after adding a card on Modal
       # optional: if VOICE_API_KEY is set, the Modal secret canwe-voice-secrets is (re)built from these
       VOICE_API_KEY: ${{ secrets.VOICE_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
