@@ -220,7 +220,8 @@ Voices on file = rahul, rahul_en (?)
 Webhook set    = yes (auto, by deploy workflow)
 Test mp3 OK    = yes. Reference = Rahul's own ElevenLabs clone export (42 s). English default.
                  A/B/C test 2026-11-09: C (multi, en, exaggeration 0.4, cfg_weight 0.8) closest → now the default
-tech-reel-studio switched = yes / no
+tech-reel-studio switched = connector works (first test reel 2026-11-09, voiced via generate_voiceover → get_voiceover);
+                            the skill's own voice.md still lists ElevenLabs Shlok as Route A (not yet edited)
 ```
 
 ## 9. Rahul's preferences for this work
