@@ -516,11 +516,22 @@ async def tg_worker(upd: dict):
             return {"ok": True}
         chat_id = msg["chat"]["id"]
         uid = str(msg.get("from", {}).get("id", ""))
-        if ALLOWED and uid not in ALLOWED:
+        volume.reload()
+        if ALLOWED:
+            allowed = uid in ALLOWED
+        else:
+            # No TELEGRAM_ALLOWED_IDS set: the first person to message the bot becomes its owner.
+            settings = _load_settings()
+            if not settings.get("_owner") and uid:
+                settings["_owner"] = uid
+                _save_settings(settings)
+                await tg("sendMessage", chat_id=chat_id,
+                         text=f"👋 You are now the owner of this bot (Telegram id {uid}). Others get 'Private bot'.")
+            allowed = uid == settings.get("_owner")
+        if not allowed:
             await tg("sendMessage", chat_id=chat_id, text="Private bot 🙂")
             return {"ok": True}
 
-        volume.reload()
         cfg = _chat_cfg(chat_id)
         text = (msg.get("text") or "").strip()
 

@@ -12,12 +12,35 @@ jobs:
     env:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      # optional: if VOICE_API_KEY is set, the Modal secret canwe-voice-secrets is (re)built from these
+      VOICE_API_KEY: ${{ secrets.VOICE_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ALLOWED_IDS: ${{ secrets.TELEGRAM_ALLOWED_IDS }}
+      GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install modal
+      - name: Sync Modal secret from GitHub secrets
+        if: env.VOICE_API_KEY != ''
+        run: |
+          python - <<'PY'
+          import json, os
+          d = {
+              "API_KEY": os.environ["VOICE_API_KEY"],
+              "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+              "TELEGRAM_ALLOWED_IDS": os.environ.get("TELEGRAM_ALLOWED_IDS", ""),
+              "GDRIVE_FOLDER_ID": "1OqqvX8winexjNInEyoC_qeHhX0uU0ooS",
+              "GDRIVE_SA_JSON": os.environ.get("GDRIVE_SA_JSON", ""),
+          }
+          d = {k: v for k, v in d.items() if v.strip()}
+          json.dump(d, open(os.path.join(os.environ["RUNNER_TEMP"], "s.json"), "w"))
+          print("keys:", sorted(d))
+          PY
+          modal secret create canwe-voice-secrets --from-json "$RUNNER_TEMP/s.json" --force
+          rm -f "$RUNNER_TEMP/s.json"
       - name: Deploy
         run: modal deploy voice_api.py
       - name: Health check
