@@ -15,7 +15,7 @@ KEY = os.environ.get("VOICE_API_KEY", "")
 
 
 def speak(text: str, out: str = "voiceover.mp3", voice: str = "rahul", model: str = "multi",
-          language: str = "hi", exaggeration: float = 0.5, cfg_weight: float = 0.5,
+          language: str = "en", exaggeration: float = 0.4, cfg_weight: float = 0.8,
           upload_to_drive: bool = False) -> str:
     r = requests.post(
         f"{BASE}/v1/audio/speech",

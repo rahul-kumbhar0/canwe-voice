@@ -33,6 +33,9 @@ HF_CACHE = DATA / "hf"                # model weights cached here (downloaded on
 DEFAULT_VOICE = "rahul"
 DEFAULT_LANG = "en"                   # en | hi | ... (23 langs)
 DEFAULT_MODEL = "multi"               # multi (V3, any language) | turbo (English + [laugh] tags)
+# Picked by Rahul from an A/B/C test (variant C): stays closest to his reference voice.
+DEFAULT_EXAGGERATION = 0.4
+DEFAULT_CFG_WEIGHT = 0.8
 
 # GPU is chosen at deploy time. Empty = CPU-only (works on Modal's free tier without a card,
 # but each voice-over takes minutes). Set the GitHub repo variable CANWE_GPU=T4 once a payment
@@ -199,8 +202,8 @@ class Voice:
         voice: str = DEFAULT_VOICE,
         lang: str = DEFAULT_LANG,
         model: str = DEFAULT_MODEL,
-        exaggeration: float = 0.5,
-        cfg_weight: float = 0.5,
+        exaggeration: float = DEFAULT_EXAGGERATION,
+        cfg_weight: float = DEFAULT_CFG_WEIGHT,
         fmt: str = "mp3",
     ) -> dict:
         import soundfile as sf
@@ -326,7 +329,7 @@ def web():
         """
         Body (OpenAI shape):
           {"input": "text", "voice": "rahul", "model": "multi"|"turbo",
-           "response_format": "mp3"|"wav", "language": "hi", "exaggeration": 0.5, "cfg_weight": 0.5}
+           "response_format": "mp3"|"wav", "language": "en", "exaggeration": 0.4, "cfg_weight": 0.8}
         Returns raw audio bytes. Same URL shape as api.openai.com/v1/audio/speech.
         """
         auth(authorization)
@@ -339,8 +342,8 @@ def web():
             "voice": body.get("voice", DEFAULT_VOICE),
             "model": "turbo" if str(body.get("model", DEFAULT_MODEL)).startswith("turbo") else "multi",
             "lang": _guess_lang(text, body.get("language", DEFAULT_LANG)),
-            "exaggeration": float(body.get("exaggeration", 0.5)),
-            "cfg_weight": float(body.get("cfg_weight", 0.5)),
+            "exaggeration": float(body.get("exaggeration", DEFAULT_EXAGGERATION)),
+            "cfg_weight": float(body.get("cfg_weight", DEFAULT_CFG_WEIGHT)),
             "fmt": body.get("response_format", "mp3"),
         }
         try:
@@ -411,10 +414,10 @@ def web():
                                  "description": "en (English, default), hi (Hindi/Hinglish), or another Chatterbox language code."},
                     "model": {"type": "string", "enum": ["multi", "turbo"], "default": DEFAULT_MODEL},
                     "voice": {"type": "string", "default": DEFAULT_VOICE},
-                    "exaggeration": {"type": "number", "default": 0.5,
+                    "exaggeration": {"type": "number", "default": DEFAULT_EXAGGERATION,
                                      "description": "0.25-1.0. Higher = more energy/drama."},
-                    "cfg_weight": {"type": "number", "default": 0.5,
-                                   "description": "0-1. Lower (0.3) = slower, calmer pacing; 0 removes accent bleed."},
+                    "cfg_weight": {"type": "number", "default": DEFAULT_CFG_WEIGHT,
+                                   "description": "0-1. Default 0.8 keeps closest to Rahul's voice; lower (0.3) = slower, calmer pacing."},
                     "upload_to_drive": {"type": "boolean", "default": False},
                 },
                 "required": ["text"],
@@ -441,8 +444,8 @@ def web():
             voice=args.get("voice", DEFAULT_VOICE),
             lang=_guess_lang(text, args.get("language", DEFAULT_LANG)),
             model="turbo" if str(args.get("model", DEFAULT_MODEL)).startswith("turbo") else "multi",
-            exaggeration=float(args.get("exaggeration", 0.5)),
-            cfg_weight=float(args.get("cfg_weight", 0.5)),
+            exaggeration=float(args.get("exaggeration", DEFAULT_EXAGGERATION)),
+            cfg_weight=float(args.get("cfg_weight", DEFAULT_CFG_WEIGHT)),
             fmt="mp3",
         )
         out = {"url": f"{base}/v1/files/{r['filename']}?sig={_sig(r['filename'])}",

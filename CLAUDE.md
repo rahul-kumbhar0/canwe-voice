@@ -218,7 +218,8 @@ API_KEY        = GitHub secret VOICE_API_KEY → synced into Modal secret canwe-
 GPU            = none (no card on Modal yet). Add card → repo variable CANWE_GPU=T4 → redeploy
 Voices on file = rahul, rahul_en (?)
 Webhook set    = yes (auto, by deploy workflow)
-Test mp3 OK    = yes / no  (Rahul's feedback: ...)
+Test mp3 OK    = yes. Reference = Rahul's own ElevenLabs clone export (42 s). English default.
+                 A/B/C test 2026-11-09: C (multi, en, exaggeration 0.4, cfg_weight 0.8) closest → now the default
 tech-reel-studio switched = yes / no
 ```
 
