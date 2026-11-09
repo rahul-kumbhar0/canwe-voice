@@ -403,8 +403,9 @@ def web():
                 "for the mp3. Use this for every reel voice-over instead of ElevenLabs. Default language is "
                 "English ('en'); pass language 'hi' only for Hindi/Hinglish scripts. Model 'turbo' is "
                 "English-only and supports [laugh]/[chuckle]/[sigh] tags. Download the URL (e.g. curl -L -o "
-                "vo.mp3 '<url>') and use the file as the reel's audio track. First call after idle can take "
-                "1-2 minutes while the GPU wakes up."
+                "vo.mp3 '<url>') and use the file as the reel's audio track. Generation can take minutes "
+                "(CPU / cold start): if the result has status 'pending', call get_voiceover with its job_id "
+                "until status is 'done' (each call waits up to ~45 s)."
             ),
             "inputSchema": {
                 "type": "object",
@@ -424,6 +425,13 @@ def web():
             },
         },
         {
+            "name": "get_voiceover",
+            "description": "Fetch the result of a pending generate_voiceover job. Waits up to ~45 s; "
+                           "returns status 'pending' (call again) or 'done' with the mp3 url.",
+            "inputSchema": {"type": "object", "properties": {"job_id": {"type": "string"}},
+                            "required": ["job_id"]},
+        },
+        {
             "name": "list_voices",
             "description": "List the cloned reference voices available for generate_voiceover.",
             "inputSchema": {"type": "object", "properties": {}},
@@ -434,12 +442,19 @@ def web():
         if name == "list_voices":
             volume.reload()
             return {"voices": list_voices(), "default": DEFAULT_VOICE}
+        if name == "get_voiceover":
+            job_id = (args.get("job_id") or "").strip()
+            if not job_id.startswith("fc-"):
+                raise ValueError("job_id from generate_voiceover is required")
+            return await _await_job(modal.FunctionCall.from_id(job_id), {}, base)
         if name != "generate_voiceover":
             raise ValueError(f"unknown tool {name}")
         text = (args.get("text") or "").strip()
         if not text:
             raise ValueError("text is required")
-        r = await Voice().synth.remote.aio(
+        # MCP clients time out around 60 s; CPU generation can take minutes. Spawn the job and
+        # wait up to ~45 s; if it is not done, hand back a job_id for get_voiceover.
+        call = await Voice().synth.spawn.aio(
             text,
             voice=args.get("voice", DEFAULT_VOICE),
             lang=_guess_lang(text, args.get("language", DEFAULT_LANG)),
@@ -448,7 +463,15 @@ def web():
             cfg_weight=float(args.get("cfg_weight", DEFAULT_CFG_WEIGHT)),
             fmt="mp3",
         )
-        out = {"url": f"{base}/v1/files/{r['filename']}?sig={_sig(r['filename'])}",
+        return await _await_job(call, args, base)
+
+    async def _await_job(call, args: dict, base: str) -> dict:
+        try:
+            r = await call.get.aio(timeout=45)
+        except (TimeoutError, modal.exception.TimeoutError):
+            return {"status": "pending", "job_id": call.object_id,
+                    "next": "call get_voiceover with this job_id"}
+        out = {"status": "done", "url": f"{base}/v1/files/{r['filename']}?sig={_sig(r['filename'])}",
                "filename": r["filename"], "duration_seconds": r["duration"], "format": "mp3"}
         if args.get("upload_to_drive"):
             try:
