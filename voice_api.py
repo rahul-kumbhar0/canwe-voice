@@ -52,7 +52,14 @@ image = (
         "google-api-python-client",
         "google-auth",
     )
-    .env({"HF_HOME": str(HF_CACHE), "HF_HUB_ENABLE_HF_TRANSFER": "0"})
+    .env({
+        "HF_HOME": str(HF_CACHE),
+        "HF_HUB_ENABLE_HF_TRANSFER": "0",
+        # hf-xet keeps log files open under HF_HOME, which makes volume.commit() fail
+        # ("open files preventing the operation"). Plain HTTP downloads are fine here.
+        "HF_HUB_DISABLE_XET": "1",
+        "HF_XET_CACHE": "/tmp/hf-xet",
+    })
 )
 
 # ---- secrets (create once, see README) --------------------------------------
@@ -160,7 +167,7 @@ class Voice:
             torch.set_num_threads(4)
         self.multi = ChatterboxMultilingualTTS.from_pretrained(device=self.device)
         self._turbo = None         # loaded on first use (saves RAM/time when only Hindi is used)
-        volume.commit()            # persist freshly downloaded weights
+        _safe_commit()             # persist freshly downloaded weights
         print(f"multi model loaded in {time.time()-t0:.1f}s on {self.device}")
 
     @property
@@ -168,7 +175,7 @@ class Voice:
         if self._turbo is None:
             from chatterbox.tts_turbo import ChatterboxTurboTTS
             self._turbo = ChatterboxTurboTTS.from_pretrained(device=self.device)
-            volume.commit()
+            _safe_commit()
         return self._turbo
 
     @modal.method()
@@ -221,9 +228,17 @@ class Voice:
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         fname = f"{int(time.time())}_{uuid.uuid4().hex[:6]}.{fmt}"
         (OUT_DIR / fname).write_bytes(audio)
-        volume.commit()
+        _safe_commit()
         duration = full.shape[-1] / sr
         return {"audio": audio, "filename": fname, "duration": round(duration, 2), "format": fmt}
+
+
+def _safe_commit():
+    """Commit the volume; never let a commit failure kill speech generation."""
+    try:
+        volume.commit()
+    except Exception as e:
+        print(f"volume.commit() skipped: {e}")
 
 
 def _split_text(text: str, max_len: int = 300) -> list[str]:
