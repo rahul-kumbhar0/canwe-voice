@@ -52,6 +52,9 @@ image = (
         "google-api-python-client",
         "google-auth",
     )
+    # hf-xet keeps log files open inside HF_HOME (on the Volume), which breaks
+    # volume.commit()/reload(). Remove it; huggingface_hub falls back to plain HTTP.
+    .run_commands("pip uninstall -y hf-xet || true")
     .env({
         "HF_HOME": str(HF_CACHE),
         "HF_HUB_ENABLE_HF_TRANSFER": "0",
@@ -191,7 +194,7 @@ class Voice:
     ) -> dict:
         import soundfile as sf
 
-        volume.reload()
+        _safe_reload()
         ref = VOICES_DIR / f"{voice}.wav"
         if not ref.exists():
             raise ValueError(f"voice '{voice}' not found. Available: {list_voices()}")
@@ -231,6 +234,14 @@ class Voice:
         _safe_commit()
         duration = full.shape[-1] / sr
         return {"audio": audio, "filename": fname, "duration": round(duration, 2), "format": fmt}
+
+
+def _safe_reload():
+    """Reload the volume; an open file inside it must not block generation."""
+    try:
+        volume.reload()
+    except Exception as e:
+        print(f"volume.reload() skipped: {e}")
 
 
 def _safe_commit():
