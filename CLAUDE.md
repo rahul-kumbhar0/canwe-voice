@@ -162,6 +162,14 @@ Tune per feedback (§6).
 - Env vars the skill needs: `VOICE_API_URL`, `VOICE_API_KEY`.
 - For English hooks with laughs use `model="turbo"` and tags like `[chuckle]`.
 
+### Step 7b — MCP connector (how Claude uses the voice while making reels)
+The web app also serves an MCP server at `https://<URL>/mcp/<API_KEY>` (Streamable HTTP, JSON).
+Add it in claude.ai → Settings → Connectors → Add custom connector (name: canwe-voice).
+Tools: `generate_voiceover(text, language="hi", model="multi", voice, exaggeration, cfg_weight,
+upload_to_drive)` → `{url, duration_seconds, filename}` (url = HMAC-signed `/v1/files/<name>?sig=`),
+and `list_voices()`. tech-reel-studio: call `generate_voiceover` with the script, `curl -L -o vo.mp3 <url>`,
+use as the voice track; fall back to ElevenLabs "Shlok" if the tool errors.
+
 ### Step 8 — optional: Google Drive upload
 console.cloud.google.com → project → enable Drive API → service account → JSON key → share the
 Drive folder `canwe-voiceovers` with the service-account email as Editor → put the JSON

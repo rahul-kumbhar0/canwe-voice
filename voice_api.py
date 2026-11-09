@@ -258,7 +258,7 @@ def drive_upload(filename: str, data: bytes, mime: str = "audio/mpeg") -> str | 
 @modal.asgi_app()
 def web():
     from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-    from fastapi.responses import Response
+    from fastapi.responses import JSONResponse, Response
 
     api = FastAPI(title="canwe-voice")
 
@@ -316,6 +316,138 @@ def web():
         wav = raw if ext == "wav" else ffmpeg_convert(raw, {"m4a": "mp4", "ogg": "ogg", "oga": "ogg"}.get(ext, ext), "wav")
         saved = save_voice(name, wav)
         return {"ok": True, "voice": saved, "voices": list_voices()}
+
+    # ---------- signed download links for generated files -------------------
+    def _sig(name: str) -> str:
+        import hashlib
+        import hmac
+        return hmac.new(os.environ.get("API_KEY", "").encode(), name.encode(), hashlib.sha256).hexdigest()[:32]
+
+    @api.get("/v1/files/{name}")
+    async def get_file(name: str, sig: str = ""):
+        import hmac
+        if not re.fullmatch(r"[0-9a-z_]+\.(mp3|wav)", name) or not hmac.compare_digest(sig, _sig(name)):
+            raise HTTPException(404)
+        volume.reload()
+        f = OUT_DIR / name
+        if not f.exists():
+            raise HTTPException(404)
+        return Response(f.read_bytes(), media_type="audio/mpeg" if name.endswith(".mp3") else "audio/wav",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    # ---------- MCP server (Streamable HTTP, JSON responses) -----------------
+    # Add in claude.ai -> Settings -> Connectors -> Add custom connector:
+    #     https://<workspace>--canwe-voice-web.modal.run/mcp/<API_KEY>
+    # Then any Claude chat / skill (e.g. tech-reel-studio) can call generate_voiceover.
+    MCP_TOOLS = [
+        {
+            "name": "generate_voiceover",
+            "description": (
+                "Generate a voice-over in Rahul's own cloned voice (canwe.ai) and return a download URL "
+                "for the mp3. Use this for every reel voice-over instead of ElevenLabs. Default language is "
+                "Hinglish/Hindi ('hi'); write Hinglish in Roman or Devanagari script. Use model 'turbo' only "
+                "for English lines that need [laugh]/[chuckle]/[sigh] tags. Download the URL (e.g. curl -L -o "
+                "vo.mp3 '<url>') and use the file as the reel's audio track. First call after idle can take "
+                "1-2 minutes while the GPU wakes up."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The full script to speak."},
+                    "language": {"type": "string", "default": DEFAULT_LANG,
+                                 "description": "hi (Hindi/Hinglish, default), en, or another Chatterbox language code."},
+                    "model": {"type": "string", "enum": ["multi", "turbo"], "default": DEFAULT_MODEL},
+                    "voice": {"type": "string", "default": DEFAULT_VOICE},
+                    "exaggeration": {"type": "number", "default": 0.5,
+                                     "description": "0.25-1.0. Higher = more energy/drama."},
+                    "cfg_weight": {"type": "number", "default": 0.5,
+                                   "description": "0-1. Lower (0.3) = slower, calmer pacing; 0 removes accent bleed."},
+                    "upload_to_drive": {"type": "boolean", "default": False},
+                },
+                "required": ["text"],
+            },
+        },
+        {
+            "name": "list_voices",
+            "description": "List the cloned reference voices available for generate_voiceover.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+    ]
+
+    async def _mcp_call(name: str, args: dict, base: str) -> dict:
+        if name == "list_voices":
+            volume.reload()
+            return {"voices": list_voices(), "default": DEFAULT_VOICE}
+        if name != "generate_voiceover":
+            raise ValueError(f"unknown tool {name}")
+        text = (args.get("text") or "").strip()
+        if not text:
+            raise ValueError("text is required")
+        r = await Voice().synth.remote.aio(
+            text,
+            voice=args.get("voice", DEFAULT_VOICE),
+            lang=_guess_lang(text, args.get("language", DEFAULT_LANG)),
+            model="turbo" if str(args.get("model", DEFAULT_MODEL)).startswith("turbo") else "multi",
+            exaggeration=float(args.get("exaggeration", 0.5)),
+            cfg_weight=float(args.get("cfg_weight", 0.5)),
+            fmt="mp3",
+        )
+        out = {"url": f"{base}/v1/files/{r['filename']}?sig={_sig(r['filename'])}",
+               "filename": r["filename"], "duration_seconds": r["duration"], "format": "mp3"}
+        if args.get("upload_to_drive"):
+            try:
+                out["drive_link"] = drive_upload(r["filename"], r["audio"])
+            except Exception as e:
+                out["drive_error"] = str(e)
+        return out
+
+    @api.get("/mcp/{secret}")
+    async def mcp_get(secret: str):
+        raise HTTPException(405)          # no server-initiated SSE stream
+
+    @api.post("/mcp/{secret}")
+    async def mcp(secret: str, request: Request):
+        import hmac
+        key = os.environ.get("API_KEY", "")
+        if not key or not hmac.compare_digest(secret, key):
+            raise HTTPException(403)
+        msg = await request.json()
+        base = f"https://{request.headers.get('host', '')}"
+
+        async def handle(m: dict):
+            mid, method, params = m.get("id"), m.get("method", ""), m.get("params") or {}
+            if mid is None:                # notification (e.g. notifications/initialized)
+                return None
+            def ok(result):
+                return {"jsonrpc": "2.0", "id": mid, "result": result}
+            if method == "initialize":
+                return ok({
+                    "protocolVersion": params.get("protocolVersion", "2025-06-18"),
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "canwe-voice", "version": "1.0.0"},
+                    "instructions": "Rahul's cloned voice. Call generate_voiceover with the reel script; "
+                                    "download the returned url and use it as the voice-over track.",
+                })
+            if method == "ping":
+                return ok({})
+            if method == "tools/list":
+                return ok({"tools": MCP_TOOLS})
+            if method == "tools/call":
+                try:
+                    res = await _mcp_call(params.get("name", ""), params.get("arguments") or {}, base)
+                    return ok({"content": [{"type": "text", "text": json.dumps(res, ensure_ascii=False)}],
+                               "structuredContent": res, "isError": False})
+                except Exception as e:
+                    return ok({"content": [{"type": "text", "text": f"error: {e}"}], "isError": True})
+            return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"method not found: {method}"}}
+
+        if isinstance(msg, list):
+            out = [r for r in [await handle(m) for m in msg] if r is not None]
+        else:
+            out = await handle(msg)
+        if not out:
+            return Response(status_code=202)
+        return JSONResponse(out)
 
     @api.get("/health")
     async def health():
